@@ -5,15 +5,15 @@ import (
 	"strings"
 )
 
-type data struct {
-	prev_url   string
-	url        string
-	about      string
-	occurences int
-	keyword    string
+type Data struct {
+	Prev_url   string
+	Url        string
+	About      string
+	Occurences int
+	Keyword    string
 }
 
-var num_urls int
+var Num_urls uint64
 
 func Filter_link(url string) bool {
 	unwanted_list := []string{
