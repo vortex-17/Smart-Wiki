@@ -15,6 +15,10 @@ import (
 )
 
 var wg sync.WaitGroup
+var done int
+var num int
+
+// var data_map map[string]int
 
 func main() {
 
@@ -25,15 +29,19 @@ func main() {
 	url_channel := make(chan c_help.Data)
 
 	//data_channel is used for sending final data for further operation.
-	data_channel := make(chan c_help.Data)
+	// data_channel := make(chan c_help.Data)
+
+	// data_map := make(map[string]int)
+	done = 1
 
 	keyword := "physics"
 	wg.Add(3)
-	go collect_urls(url_channel, data_channel)
-	go collect_urls(url_channel, data_channel)
-	go collect_urls(url_channel, data_channel)
+	go collect_urls(url_channel)
+	go collect_urls(url_channel)
+	go collect_urls(url_channel)
+	// go collect_urls(url_channel, data_channel)
 
-	go listen_data(data_channel)
+	// go listen_data(data_channel)
 
 	d := c_help.Data{
 		Prev_url:   "Root",
@@ -43,16 +51,19 @@ func main() {
 		About:      "",
 	}
 
-	crawl(500, d, url_channel, data_channel)
+	go crawl(100, d, url_channel)
 
 	wg.Wait()
 	close(url_channel)
+	// close(data_channel)
+	fmt.Println("scraping done")
+	fmt.Println("Number of links crawler got: ", len(c_help.Data_list))
 
 	//print out final data
 
 }
 
-func crawl(n uint64, u c_help.Data, url_channel chan c_help.Data, data_channel chan c_help.Data) {
+func crawl(n uint64, u c_help.Data, url_channel chan c_help.Data) {
 
 	if c_help.Num_urls > n {
 		//sending end signal
@@ -95,9 +106,10 @@ func crawl(n uint64, u c_help.Data, url_channel chan c_help.Data, data_channel c
 			scraped_data.Keyword = keyword
 			scraped_data.Occurences = num
 			scraped_data.About = about_word
-			// fmt.Println(c_help.Num_urls, scraped_data)
-			data_channel <- scraped_data
+			fmt.Println(c_help.Num_urls, scraped_data)
 			atomic.AddUint64(&c_help.Num_urls, 1)
+			c_help.Data_list = append(c_help.Data_list, scraped_data)
+			// data_channel <- scraped_data
 		}
 
 	})
@@ -124,14 +136,16 @@ func crawl(n uint64, u c_help.Data, url_channel chan c_help.Data, data_channel c
 
 }
 
-func collect_urls(url_channel chan c_help.Data, data_channel chan c_help.Data) {
+func collect_urls(url_channel chan c_help.Data) {
 
 	for data := range url_channel {
 		// fmt.Println("Crawling URL : ", url)
 		if data.Url == "" {
+			done = 0
 			break
-		} else {
-			go crawl(500, data, url_channel, data_channel)
+		}
+		if done == 1 {
+			go crawl(100, data, url_channel)
 		}
 
 	}
@@ -142,36 +156,11 @@ func collect_urls(url_channel chan c_help.Data, data_channel chan c_help.Data) {
 
 func listen_data(data_channel chan c_help.Data) {
 	for data := range data_channel {
-		fmt.Println(data)
+		// fmt.Println(data)
+		c_help.Data_list = append(c_help.Data_list, data)
+		num++
 	}
 
+	// close(data_channel)
+
 }
-
-// func collect_urls(url_channel chan data, data_channel chan data) {
-// 	for data := range data_channel {
-// 		// fmt.Println("Data Channel : ", data)
-// 		url_channel <- data
-// 		// fmt.Println("Inserted")
-// 	}
-// 	fmt.Println("Closing")
-// 	close(url_channel)
-// }
-
-// func collect_data(url_channel chan data, data_channel chan data) {
-// 	for data := range url_channel {
-// 		// fmt.Println("URL Channel : ", data)
-// 		if data.url == "" {
-// 			break
-// 		} else {
-// 			go crawl(500, data, data_channel)
-// 		}
-
-// 		// fmt.Println("Inserted")
-// 	}
-// 	fmt.Println("Closing Data channel")
-// 	close(data_channel)
-// }
-
-// func workers(url_channel chan string, crawl_channel chan string){
-
-// }

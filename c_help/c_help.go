@@ -15,6 +15,8 @@ type Data struct {
 
 var Num_urls uint64
 
+var Data_list []Data
+
 func Filter_link(url string) bool {
 	unwanted_list := []string{
 		".JPG", ".jpg", "identifier", "Wikipedia", "file", "Special", "Category", "File", "Help", "Template", "Talk", "Module", "Portal",
