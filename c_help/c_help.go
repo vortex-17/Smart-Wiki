@@ -1,6 +1,7 @@
 package c_help
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 )
@@ -16,6 +17,8 @@ type Data struct {
 var Num_urls uint64
 
 var Data_list []Data
+
+var Visited map[string]bool
 
 func Filter_link(url string) bool {
 	unwanted_list := []string{
@@ -54,10 +57,22 @@ func Find_word_count(data string, keyword string) int {
 	return num
 }
 
-// func main() {
-// 	fmt.Println("this is a helper function")
-// }
+func Sort_data(data_list []Data) []Data {
+	for i := 0; i < len(data_list); i++ {
+		max := i
+		for j := i; j < len(data_list); j++ {
+			if data_list[j].Occurences >= data_list[max].Occurences {
+				max = j
+			}
+		}
 
-func Sort_data() {
-	return
+		data_list[i], data_list[max] = data_list[max], data_list[i]
+	}
+	return data_list
+}
+
+func Print(data_list []Data) {
+	for i := 0; i < len(data_list); i++ {
+		fmt.Println(i, data_list[i])
+	}
 }

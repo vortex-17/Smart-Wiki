@@ -51,22 +51,39 @@ func main() {
 		About:      "",
 	}
 
+	// c_help.Visited = make(map[string]bool)
+	// c_help.Visited[seed_url] = false
 	go crawl(100, d, url_channel)
 
 	wg.Wait()
-	close(url_channel)
+	// close(url_channel)
 	// close(data_channel)
+	if _, ok := <-url_channel; !ok {
+		close(url_channel)
+	}
 	fmt.Println("scraping done")
 	fmt.Println("Number of links crawler got: ", len(c_help.Data_list))
 
+	//sort according to occurrences
+	sorted_data := c_help.Sort_data(c_help.Data_list)
+	fmt.Println("data sorted")
+
 	//print out final data
+	c_help.Print(sorted_data)
+	// fmt.Println(len(sorted_data))
+	// fmt.Scanln()
 
 }
 
 func crawl(n uint64, u c_help.Data, url_channel chan c_help.Data) {
 
-	if c_help.Num_urls > n {
+	// if done == 0 {
+	// 	return
+	// }
+
+	if c_help.Num_urls >= n {
 		//sending end signal
+		// fmt.Println(c_help.Num_urls)
 		d := c_help.Data{
 			Prev_url:   "",
 			Url:        "",
@@ -74,7 +91,12 @@ func crawl(n uint64, u c_help.Data, url_channel chan c_help.Data) {
 			Occurences: 0,
 			Keyword:    "",
 		}
+
+		// if _, ok := <-url_channel; !ok {
+		// 	return
+		// }
 		url_channel <- d
+		// close(url_channel)
 		return
 	}
 
@@ -83,7 +105,7 @@ func crawl(n uint64, u c_help.Data, url_channel chan c_help.Data) {
 	c := colly.NewCollector(
 		colly.AllowedDomains("en.wikipedia.org"),
 		colly.MaxDepth(5),
-		// colly.Async(true),
+		colly.Async(true),
 	)
 	// c.Limit(&colly.LimitRule{
 	// 	Delay: 1 * time.Second,
@@ -106,7 +128,7 @@ func crawl(n uint64, u c_help.Data, url_channel chan c_help.Data) {
 			scraped_data.Keyword = keyword
 			scraped_data.Occurences = num
 			scraped_data.About = about_word
-			fmt.Println(c_help.Num_urls, scraped_data)
+			// fmt.Println(c_help.Num_urls, scraped_data)
 			atomic.AddUint64(&c_help.Num_urls, 1)
 			c_help.Data_list = append(c_help.Data_list, scraped_data)
 			// data_channel <- scraped_data
@@ -125,12 +147,18 @@ func crawl(n uint64, u c_help.Data, url_channel chan c_help.Data) {
 				Occurences: 0,
 				Keyword:    keyword,
 			}
+			// c_help.Visited[e.Request.AbsoluteURL(link)] = false
 			url_channel <- d
 		} else {
 			return
 		}
 
 	})
+
+	// if c_help.Visited[u.Url] == false {
+	// 	c_help.Visited[u.Url] = true
+	// 	c.Visit(u.Url)
+	// }
 
 	c.Visit(u.Url)
 
