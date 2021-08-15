@@ -7,9 +7,14 @@ package main
 import (
 	"crawler/c_help"
 	"fmt"
+	"log"
+	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
+
+	"github.com/gorilla/mux"
 
 	"github.com/gocolly/colly"
 )
@@ -18,12 +23,73 @@ var wg sync.WaitGroup
 var done int
 var num int
 
+// var sorted_data []c_help.Data
+
 // var data_map map[string]int
 
-func main() {
+func Send_data(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	w.Header().Set("Content-Type", "text/html")
+	sorted_data := Initialise_crawler(vars["keyword"])
+	fmt.Fprintf(w, "<h2> Hello </h2>")
+	// fmt.Println(sorted_data)
+	for c := range sorted_data {
+		fmt.Fprintf(w, "<a href = %s>%s</p>", sorted_data[c].Url, sorted_data[c].About)
+	}
+	// sorted_data = make([]c_help.Data, 0)
+	// c_help.Num_urls = 0
+}
 
+func NotFound(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNotFound)
+	fmt.Fprintf(w, "<h2> Could not find the page</h2>")
+}
+
+func main() {
+	r := mux.NewRouter()
+	s := r.Methods("GET").Subrouter()
+	s.NotFoundHandler = http.HandlerFunc(NotFound)
+	s.HandleFunc("/data/{keyword}", Send_data)
+	srv := &http.Server{
+		Handler: r,
+		Addr:    "127.0.0.1:3000",
+		// Good practice: enforce timeouts for servers you create!
+		WriteTimeout: 15 * time.Second,
+		ReadTimeout:  15 * time.Second,
+	}
+
+	log.Fatal(srv.ListenAndServe())
+	// Initialise_crawler()
+}
+
+func Initialise_crawler(keyword string) []c_help.Data {
+
+	sorted_data := make([]c_help.Data, 0)
+	c_help.Data_list = make([]c_help.Data, 0)
+
+	c_help.Num_urls = 0
+
+	keyword = strings.ToLower(keyword)
+	split_keywords := strings.Split(keyword, "-")
+	keyword = strings.Join(split_keywords, " ")
+	var url_keyword string
+
+	fmt.Println(keyword, split_keywords)
+	if len(split_keywords) == 1 {
+		url_keyword = strings.Title(split_keywords[0])
+	} else {
+		first_word := strings.Title(split_keywords[0])
+		key := strings.Join(split_keywords[1:], "_")
+		url_keyword = first_word + "_" + key
+
+	}
+	fmt.Println(url_keyword)
 	fmt.Println("Welcome to web crawler")
-	seed_url := "https://en.wikipedia.org/wiki/Physics"
+	seed_url := "https://en.wikipedia.org/wiki/"
+	seed_url += url_keyword
+
+	fmt.Println(seed_url)
 
 	// url_channel is the channel used to send links back for finding hyperlinks and data.
 	url_channel := make(chan c_help.Data)
@@ -34,11 +100,10 @@ func main() {
 	// data_map := make(map[string]int)
 	done = 1
 
-	keyword := "physics"
-	wg.Add(3)
+	wg.Add(2)
 	go collect_urls(url_channel)
 	go collect_urls(url_channel)
-	go collect_urls(url_channel)
+	// go collect_urls(url_channel)
 	// go collect_urls(url_channel, data_channel)
 
 	// go listen_data(data_channel)
@@ -53,7 +118,8 @@ func main() {
 
 	// c_help.Visited = make(map[string]bool)
 	// c_help.Visited[seed_url] = false
-	go crawl(100, d, url_channel)
+	atomic.AddUint64(&c_help.Num_urls, 1)
+	crawl(100, d, url_channel)
 
 	wg.Wait()
 	// close(url_channel)
@@ -65,25 +131,23 @@ func main() {
 	fmt.Println("Number of links crawler got: ", len(c_help.Data_list))
 
 	//sort according to occurrences
-	sorted_data := c_help.Sort_data(c_help.Data_list)
+	sorted_data = c_help.Sort_data(c_help.Data_list)
 	fmt.Println("data sorted")
 
 	//print out final data
-	c_help.Print(sorted_data)
+	// c_help.Print(sorted_data)
 	// fmt.Println(len(sorted_data))
 	// fmt.Scanln()
+
+	return sorted_data
 
 }
 
 func crawl(n uint64, u c_help.Data, url_channel chan c_help.Data) {
 
-	// if done == 0 {
-	// 	return
-	// }
-
 	if c_help.Num_urls >= n {
 		//sending end signal
-		// fmt.Println(c_help.Num_urls)
+		fmt.Println(c_help.Num_urls)
 		d := c_help.Data{
 			Prev_url:   "",
 			Url:        "",
@@ -92,11 +156,7 @@ func crawl(n uint64, u c_help.Data, url_channel chan c_help.Data) {
 			Keyword:    "",
 		}
 
-		// if _, ok := <-url_channel; !ok {
-		// 	return
-		// }
 		url_channel <- d
-		// close(url_channel)
 		return
 	}
 
@@ -128,7 +188,7 @@ func crawl(n uint64, u c_help.Data, url_channel chan c_help.Data) {
 			scraped_data.Keyword = keyword
 			scraped_data.Occurences = num
 			scraped_data.About = about_word
-			// fmt.Println(c_help.Num_urls, scraped_data)
+			fmt.Println(c_help.Num_urls, scraped_data)
 			atomic.AddUint64(&c_help.Num_urls, 1)
 			c_help.Data_list = append(c_help.Data_list, scraped_data)
 			// data_channel <- scraped_data
@@ -148,6 +208,7 @@ func crawl(n uint64, u c_help.Data, url_channel chan c_help.Data) {
 				Keyword:    keyword,
 			}
 			// c_help.Visited[e.Request.AbsoluteURL(link)] = false
+			// fmt.Println(e.Request.AbsoluteURL(link))
 			url_channel <- d
 		} else {
 			return

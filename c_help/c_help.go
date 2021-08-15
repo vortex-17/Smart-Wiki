@@ -52,8 +52,11 @@ func Count_words(words []string, keyword string) int {
 	return num
 }
 func Find_word_count(data string, keyword string) int {
-	word_list := Get_words_from(data)
-	num := Count_words(word_list, keyword)
+	// word_list := Get_words_from(data)
+	// num := Count_words(word_list, keyword)
+	data = strings.ToLower(data)
+	keyword = strings.ToLower(keyword)
+	num := strings.Count(data, keyword)
 	return num
 }
 
