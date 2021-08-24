@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -27,6 +26,53 @@ var num int
 
 // var data_map map[string]int
 
+type SafeCounter struct {
+	mu sync.Mutex
+	v  int
+}
+
+func (c *SafeCounter) Inc() {
+	c.mu.Lock()
+	// Lock so only one goroutine at a time can access the map c.v.
+	c.v++
+	c.mu.Unlock()
+}
+
+// Value returns the current value of the counter for the given key.
+func (c *SafeCounter) Value() int {
+	c.mu.Lock()
+	// Lock so only one goroutine at a time can access the map c.v.
+	defer c.mu.Unlock()
+	return c.v
+}
+
+var counter SafeCounter
+
+func SafeClose(ch chan c_help.Data) (justClosed bool) {
+	defer func() {
+		if recover() != nil {
+			// The return result can be altered
+			// in a defer function call.
+			justClosed = false
+		}
+	}()
+
+	// assume ch != nil here.
+	close(ch)   // panic if ch is closed
+	return true // <=> justClosed = true; return
+}
+
+func SafeSend(ch chan c_help.Data, value c_help.Data) (closed bool) {
+	defer func() {
+		if recover() != nil {
+			closed = true
+		}
+	}()
+
+	ch <- value  // panic if ch is closed
+	return false // <=> closed = false; return
+}
+
 func Send_data(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	w.Header().Set("Content-Type", "text/html")
@@ -36,8 +82,6 @@ func Send_data(w http.ResponseWriter, r *http.Request) {
 	for c := range sorted_data {
 		fmt.Fprintf(w, "<a href = %s>%s</p>", sorted_data[c].Url, sorted_data[c].About)
 	}
-	// sorted_data = make([]c_help.Data, 0)
-	// c_help.Num_urls = 0
 }
 
 func NotFound(w http.ResponseWriter, r *http.Request) {
@@ -69,6 +113,7 @@ func Initialise_crawler(keyword string) []c_help.Data {
 	c_help.Data_list = make([]c_help.Data, 0)
 
 	c_help.Num_urls = 0
+	counter.v = 0
 
 	keyword = strings.ToLower(keyword)
 	split_keywords := strings.Split(keyword, "-")
@@ -92,7 +137,7 @@ func Initialise_crawler(keyword string) []c_help.Data {
 	fmt.Println(seed_url)
 
 	// url_channel is the channel used to send links back for finding hyperlinks and data.
-	url_channel := make(chan c_help.Data)
+	url_channel := make(chan c_help.Data, 10)
 
 	//data_channel is used for sending final data for further operation.
 	// data_channel := make(chan c_help.Data)
@@ -100,13 +145,10 @@ func Initialise_crawler(keyword string) []c_help.Data {
 	// data_map := make(map[string]int)
 	done = 1
 
-	wg.Add(2)
-	go collect_urls(url_channel)
+	wg.Add(1)
 	go collect_urls(url_channel)
 	// go collect_urls(url_channel)
-	// go collect_urls(url_channel, data_channel)
-
-	// go listen_data(data_channel)
+	// go collect_urls(url_channel)
 
 	d := c_help.Data{
 		Prev_url:   "Root",
@@ -115,18 +157,15 @@ func Initialise_crawler(keyword string) []c_help.Data {
 		Occurences: 0,
 		About:      "",
 	}
-
-	// c_help.Visited = make(map[string]bool)
-	// c_help.Visited[seed_url] = false
-	atomic.AddUint64(&c_help.Num_urls, 1)
-	crawl(100, d, url_channel)
+	crawl(10, d, url_channel)
 
 	wg.Wait()
 	// close(url_channel)
 	// close(data_channel)
-	if _, ok := <-url_channel; !ok {
-		close(url_channel)
-	}
+	counter.Inc()
+	fmt.Println("content in channel: ", len(url_channel))
+
+	SafeClose(url_channel)
 	fmt.Println("scraping done")
 	fmt.Println("Number of links crawler got: ", len(c_help.Data_list))
 
@@ -134,29 +173,14 @@ func Initialise_crawler(keyword string) []c_help.Data {
 	sorted_data = c_help.Sort_data(c_help.Data_list)
 	fmt.Println("data sorted")
 
-	//print out final data
-	// c_help.Print(sorted_data)
-	// fmt.Println(len(sorted_data))
-	// fmt.Scanln()
-
 	return sorted_data
 
 }
 
 func crawl(n uint64, u c_help.Data, url_channel chan c_help.Data) {
 
-	if c_help.Num_urls >= n {
-		//sending end signal
-		fmt.Println(c_help.Num_urls)
-		d := c_help.Data{
-			Prev_url:   "",
-			Url:        "",
-			About:      "",
-			Occurences: 0,
-			Keyword:    "",
-		}
-
-		url_channel <- d
+	if uint64(counter.Value()) >= n {
+		fmt.Println("Oops, we got all our links")
 		return
 	}
 
@@ -164,22 +188,21 @@ func crawl(n uint64, u c_help.Data, url_channel chan c_help.Data) {
 	// fmt.Println("crawler")
 	c := colly.NewCollector(
 		colly.AllowedDomains("en.wikipedia.org"),
-		colly.MaxDepth(5),
-		colly.Async(true),
+		// colly.Async(true),
 	)
 	// c.Limit(&colly.LimitRule{
 	// 	Delay: 1 * time.Second,
 	// })
 
 	c.OnRequest(func(r *colly.Request) {
-		// fmt.Println(r.URL.String())
+		// fmt.Println("Visiting :", r.URL.String())
 	})
 
 	c.OnResponse(func(r *colly.Response) {
 
 		var num int
 		num = c_help.Find_word_count(string(r.Body), keyword)
-		if num > 1 && c_help.Num_urls <= n {
+		if num > 1 && uint64(counter.Value()) < n {
 			url := string(r.Request.URL.String())
 			about := strings.Split(url, "/")
 			about_word := about[len(about)-1]
@@ -188,8 +211,10 @@ func crawl(n uint64, u c_help.Data, url_channel chan c_help.Data) {
 			scraped_data.Keyword = keyword
 			scraped_data.Occurences = num
 			scraped_data.About = about_word
-			fmt.Println(c_help.Num_urls, scraped_data)
-			atomic.AddUint64(&c_help.Num_urls, 1)
+			// fmt.Println(c_help.Num_urls, scraped_data)
+			counter.Inc()
+			fmt.Println("data: ", uint64(counter.Value()), scraped_data)
+			// atomic.AddUint64(&c_help.Num_urls, 1)
 			c_help.Data_list = append(c_help.Data_list, scraped_data)
 			// data_channel <- scraped_data
 		}
@@ -197,59 +222,48 @@ func crawl(n uint64, u c_help.Data, url_channel chan c_help.Data) {
 	})
 
 	c.OnHTML("a[href]", func(e *colly.HTMLElement) {
-		link := e.Attr("href")
-		check := c_help.Filter_link(e.Request.AbsoluteURL(link))
-		if check == true && c_help.Num_urls <= n {
-			d := c_help.Data{
-				Prev_url:   u.Url,
-				Url:        e.Request.AbsoluteURL(link),
-				About:      "",
-				Occurences: 0,
-				Keyword:    keyword,
+		if uint64(counter.Value()) <= n {
+			link := e.Attr("href")
+			check := c_help.Filter_link(e.Request.AbsoluteURL(link))
+			if check == true && uint64(counter.Value()) <= n {
+				d := c_help.Data{
+					Prev_url:   u.Url,
+					Url:        e.Request.AbsoluteURL(link),
+					About:      "",
+					Occurences: 0,
+					Keyword:    keyword,
+				}
+
+				if SafeSend(url_channel, d) == true {
+					fmt.Println("Oops, not a safe send")
+				}
 			}
-			// c_help.Visited[e.Request.AbsoluteURL(link)] = false
-			// fmt.Println(e.Request.AbsoluteURL(link))
-			url_channel <- d
 		} else {
 			return
 		}
 
 	})
 
-	// if c_help.Visited[u.Url] == false {
-	// 	c_help.Visited[u.Url] = true
-	// 	c.Visit(u.Url)
-	// }
-
 	c.Visit(u.Url)
+	// return
 
 }
 
 func collect_urls(url_channel chan c_help.Data) {
 
 	for data := range url_channel {
-		// fmt.Println("Crawling URL : ", url)
-		if data.Url == "" {
-			done = 0
+
+		// fmt.Println(counter.Value(), data.Url)
+		if counter.Value() >= 10 {
+			fmt.Println("number of url >>>> 100")
 			break
-		}
-		if done == 1 {
-			go crawl(100, data, url_channel)
+		} else {
+			// fmt.Println("Crawling URL : ", data.Url)
+			go crawl(10, data, url_channel)
 		}
 
 	}
 
 	fmt.Println("I am done")
 	wg.Done()
-}
-
-func listen_data(data_channel chan c_help.Data) {
-	for data := range data_channel {
-		// fmt.Println(data)
-		c_help.Data_list = append(c_help.Data_list, data)
-		num++
-	}
-
-	// close(data_channel)
-
 }
