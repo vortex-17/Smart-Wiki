@@ -31,10 +31,15 @@ type SafeCounter struct {
 	v  int
 }
 
-func (c *SafeCounter) Inc() {
+type SafeMap struct {
+	mu sync.Mutex
+	m  map[string]bool
+}
+
+func (c *SafeCounter) Inc(n int) {
 	c.mu.Lock()
 	// Lock so only one goroutine at a time can access the map c.v.
-	c.v++
+	c.v += n
 	c.mu.Unlock()
 }
 
@@ -46,7 +51,19 @@ func (c *SafeCounter) Value() int {
 	return c.v
 }
 
+func (sm *SafeMap) Check(s string) bool {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if _, found := sm.m[s]; !found {
+		sm.m[s] = true
+		return false
+	}
+
+	return true
+}
+
 var counter SafeCounter
+var checker SafeMap
 
 func SafeClose(ch chan c_help.Data) (justClosed bool) {
 	defer func() {
@@ -112,8 +129,8 @@ func Initialise_crawler(keyword string) []c_help.Data {
 	sorted_data := make([]c_help.Data, 0)
 	c_help.Data_list = make([]c_help.Data, 0)
 
-	c_help.Num_urls = 0
 	counter.v = 0
+	checker.m = make(map[string]bool)
 
 	keyword = strings.ToLower(keyword)
 	split_keywords := strings.Split(keyword, "-")
@@ -137,19 +154,16 @@ func Initialise_crawler(keyword string) []c_help.Data {
 	fmt.Println(seed_url)
 
 	// url_channel is the channel used to send links back for finding hyperlinks and data.
-	url_channel := make(chan c_help.Data, 10)
+	url_channel := make(chan c_help.Data)
+	fmt.Println("Created data channel")
 
-	//data_channel is used for sending final data for further operation.
-	// data_channel := make(chan c_help.Data)
-
-	// data_map := make(map[string]int)
 	done = 1
 
-	wg.Add(1)
+	wg.Add(3)
 	go collect_urls(url_channel)
-	// go collect_urls(url_channel)
-	// go collect_urls(url_channel)
-
+	go collect_urls(url_channel)
+	go collect_urls(url_channel)
+	fmt.Println("Started goroutine")
 	d := c_help.Data{
 		Prev_url:   "Root",
 		Url:        seed_url,
@@ -157,12 +171,11 @@ func Initialise_crawler(keyword string) []c_help.Data {
 		Occurences: 0,
 		About:      "",
 	}
-	crawl(10, d, url_channel)
+	url_channel <- d
 
+	fmt.Println("started my service")
 	wg.Wait()
-	// close(url_channel)
-	// close(data_channel)
-	counter.Inc()
+	counter.Inc(1)
 	fmt.Println("content in channel: ", len(url_channel))
 
 	SafeClose(url_channel)
@@ -178,7 +191,6 @@ func Initialise_crawler(keyword string) []c_help.Data {
 }
 
 func crawl(n uint64, u c_help.Data, url_channel chan c_help.Data) {
-
 	if uint64(counter.Value()) >= n {
 		fmt.Println("Oops, we got all our links")
 		return
@@ -199,7 +211,7 @@ func crawl(n uint64, u c_help.Data, url_channel chan c_help.Data) {
 	})
 
 	c.OnResponse(func(r *colly.Response) {
-
+		fmt.Println(r.StatusCode)
 		var num int
 		num = c_help.Find_word_count(string(r.Body), keyword)
 		if num > 1 && uint64(counter.Value()) < n {
@@ -212,20 +224,27 @@ func crawl(n uint64, u c_help.Data, url_channel chan c_help.Data) {
 			scraped_data.Occurences = num
 			scraped_data.About = about_word
 			// fmt.Println(c_help.Num_urls, scraped_data)
-			counter.Inc()
+			counter.Inc(1)
 			fmt.Println("data: ", uint64(counter.Value()), scraped_data)
-			// atomic.AddUint64(&c_help.Num_urls, 1)
 			c_help.Data_list = append(c_help.Data_list, scraped_data)
-			// data_channel <- scraped_data
 		}
 
+	})
+
+	c.OnError(func(r *colly.Response, err error) {
+		log.Println("error:", r.StatusCode, err, counter.Value())
+		if counter.Value() == 0 {
+			log.Println("Root URL is bad")
+			close(url_channel)
+		}
+		return
 	})
 
 	c.OnHTML("a[href]", func(e *colly.HTMLElement) {
 		if uint64(counter.Value()) <= n {
 			link := e.Attr("href")
 			check := c_help.Filter_link(e.Request.AbsoluteURL(link))
-			if check == true && uint64(counter.Value()) <= n {
+			if check == true && uint64(counter.Value()) <= n && checker.Check(e.Request.AbsoluteURL(link)) == false {
 				d := c_help.Data{
 					Prev_url:   u.Url,
 					Url:        e.Request.AbsoluteURL(link),
@@ -245,7 +264,7 @@ func crawl(n uint64, u c_help.Data, url_channel chan c_help.Data) {
 	})
 
 	c.Visit(u.Url)
-	// return
+	return
 
 }
 
@@ -254,12 +273,12 @@ func collect_urls(url_channel chan c_help.Data) {
 	for data := range url_channel {
 
 		// fmt.Println(counter.Value(), data.Url)
-		if counter.Value() >= 10 {
+		if counter.Value() >= 100 {
 			fmt.Println("number of url >>>> 100")
 			break
 		} else {
 			// fmt.Println("Crawling URL : ", data.Url)
-			go crawl(10, data, url_channel)
+			go crawl(100, data, url_channel)
 		}
 
 	}
