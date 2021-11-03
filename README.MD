@@ -1,9 +1,3 @@
 Smart Wiki
 
-Current Issues:
-1. Cannot handle concurrent requests
-
-Things to be done:
-1. Display them in an informative fashion
-2. Comment everything
-3. Proper README.md
+This is a fast web crawler which scans wikipedia pages and sends back the most  links relevant to the searched term. This is based on Go-colly.
